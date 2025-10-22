@@ -117,10 +117,13 @@ class Auth extends BaseController
                 ]);
             }
 
+            // Security: Sanitize input
+            $email = filter_var($this->request->getPost('email'), FILTER_SANITIZE_EMAIL);
+            
             // Get user from database
             $db = \Config\Database::connect();
             $builder = $db->table('users');
-            $user = $builder->where('email', $this->request->getPost('email'))->get()->getRowArray();
+            $user = $builder->where('email', $email)->get()->getRowArray();
 
             // Check if user exists and verify password
             if ($user && password_verify($this->request->getPost('password'), $user['password_hash'])) {
@@ -163,17 +166,81 @@ class Auth extends BaseController
     }
 
     /**
-     * Protected dashboard page
+     * Protected dashboard page with role-based content
      */
     public function dashboard()
     {
-        // Check if user is logged in
+        // Authorization check - ensure user is logged in
         if (!session()->get('isLoggedIn')) {
             session()->setFlashdata('error', 'Please login to access the dashboard');
             return redirect()->to('/login');
         }
 
-        // Display dashboard
-        return view('auth/dashboard');
+        // Get user role from session
+        $role = session()->get('role');
+        $userID = session()->get('userID');
+        
+        // Connect to database
+        $db = \Config\Database::connect();
+        
+        // Fetch role-specific data
+        $data = [
+            'role' => $role,
+            'userName' => session()->get('name'),
+            'userEmail' => session()->get('email'),
+            'userID' => $userID
+        ];
+        
+        // Fetch role-specific statistics
+        switch ($role) {
+            case 'admin':
+                // Admin sees all users count
+                $data['totalUsers'] = $db->table('users')->countAllResults();
+                $data['totalStudents'] = $db->table('users')->where('role', 'student')->countAllResults();
+                $data['totalTeachers'] = $db->table('users')->where('role', 'teacher')->countAllResults();
+                $data['totalAdmins'] = $db->table('users')->where('role', 'admin')->countAllResults();
+                
+                // Get recent users
+                $data['recentUsers'] = $db->table('users')
+                    ->select('id, name, email, role, created_at')
+                    ->orderBy('created_at', 'DESC')
+                    ->limit(5)
+                    ->get()
+                    ->getResultArray();
+                break;
+                
+            case 'teacher':
+                // Teacher sees their students count (placeholder)
+                $data['totalStudents'] = $db->table('users')->where('role', 'student')->countAllResults();
+                $data['myClasses'] = 0; // Placeholder for future implementation
+                $data['pendingAssignments'] = 0; // Placeholder
+                break;
+                
+            case 'student':
+                // Student sees their own data
+                $data['enrolledCourses'] = 0; // Placeholder for future implementation
+                $data['completedAssignments'] = 0; // Placeholder
+                $data['pendingAssignments'] = 0; // Placeholder
+                break;
+        }
+
+        // Display dashboard with role-specific data
+        return view('auth/dashboard', $data);
+    }
+    
+    /**
+     * Check if user has specific role (helper method)
+     */
+    private function hasRole($role)
+    {
+        return session()->get('role') === $role;
+    }
+    
+    /**
+     * Check if user is authorized for admin functions
+     */
+    private function isAdmin()
+    {
+        return $this->hasRole('admin');
     }
 }
